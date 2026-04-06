@@ -1,0 +1,89 @@
+name: customer-support-triage
+version: "1.0.0"
+description: >
+  A real-world customer support triage environment where AI agents learn to classify,
+  prioritize, escalate, and respond to support tickets. Covers billing, technical,
+  account, and general issues across free, pro, and enterprise customer tiers.
+
+author: OpenEnv Hackathon Submission
+tags:
+  - openenv
+  - customer-support
+  - nlp
+  - classification
+  - real-world
+
+tasks:
+  - id: easy
+    difficulty: easy
+    description: >
+      Simple, single-issue tickets such as password resets and invoice requests.
+      Correct category classification and a helpful response are the primary goals.
+    max_steps: 5
+    reward_range: [0.0, 1.0]
+
+  - id: medium
+    difficulty: medium
+    description: >
+      Multi-issue tickets involving duplicate billing charges, API errors affecting
+      production, and plan downgrade requests near renewal. Requires correct
+      escalation decisions alongside accurate classification.
+    max_steps: 8
+    reward_range: [0.0, 1.0]
+
+  - id: hard
+    difficulty: hard
+    description: >
+      Complex, high-stakes tickets: suspected account breaches with legal threats,
+      enterprise SLA outage violations, and multi-issue GDPR deletion + refund
+      requests. Requires urgent prioritization, escalation, and thorough empathetic
+      responses that address every customer demand.
+    max_steps: 10
+    reward_range: [0.0, 1.0]
+
+observation_space:
+  type: object
+  description: Structured customer support ticket with metadata
+  fields:
+    ticket_id: string
+    subject: string
+    body: string
+    customer_tier: "free | pro | enterprise"
+    previous_contacts: integer
+    attachments: list[string]
+    task_description: string
+    step: integer
+    max_steps: integer
+    current_score: float
+    feedback: "string | null"
+
+action_space:
+  type: object
+  description: Agent's triage decisions and response
+  fields:
+    category: "billing | technical | account | general | refund"
+    priority: "low | medium | high | urgent"
+    response: string
+    escalate: boolean
+    resolve: boolean
+    tags: list[string]
+
+reward:
+  type: float
+  range: [0.0, 1.0]
+  description: >
+    Per-step reward based on: category accuracy (0.25), priority accuracy (0.25),
+    escalation correctness (0.15), response quality (0.35).
+    Partial credit is given for adjacent priority levels.
+    Response quality is scored on key topic coverage and required phrase inclusion.
+
+endpoints:
+  base_url: http://localhost:7860
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+  tasks: GET /tasks
+
+docker:
+  image: customer-support-triage
+  port: 7860

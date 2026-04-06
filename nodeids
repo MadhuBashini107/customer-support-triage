@@ -1,0 +1,19 @@
+[
+  "tests/test_environment.py::TestEnvironment::test_all_tasks_work",
+  "tests/test_environment.py::TestEnvironment::test_graders_score_in_range",
+  "tests/test_environment.py::TestEnvironment::test_max_steps_ends_episode",
+  "tests/test_environment.py::TestEnvironment::test_reset_returns_observation",
+  "tests/test_environment.py::TestEnvironment::test_resolve_ends_episode",
+  "tests/test_environment.py::TestEnvironment::test_state_reflects_current_state",
+  "tests/test_environment.py::TestEnvironment::test_step_increments",
+  "tests/test_environment.py::TestGrader::test_adjacent_priority_partial_credit",
+  "tests/test_environment.py::TestGrader::test_missing_escalation_penalized",
+  "tests/test_environment.py::TestGrader::test_perfect_easy_action",
+  "tests/test_environment.py::TestGrader::test_prohibited_phrase_penalized",
+  "tests/test_environment.py::TestGrader::test_reward_clamped_to_range",
+  "tests/test_environment.py::TestGrader::test_wrong_category_gives_partial",
+  "tests/test_environment.py::TestSpecCompliance::test_action_accepts_partial",
+  "tests/test_environment.py::TestSpecCompliance::test_done_is_bool",
+  "tests/test_environment.py::TestSpecCompliance::test_observation_is_pydantic",
+  "tests/test_environment.py::TestSpecCompliance::test_reward_in_range"
+]
