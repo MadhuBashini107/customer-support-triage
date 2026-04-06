@@ -60,13 +60,15 @@ def health():
 # ─────────────────────────── OpenEnv API ───────────────────────────
 
 class ResetRequest(BaseModel):
-    task_id: str = "easy"
+    task_id: Optional[str] = "easy"
     seed: Optional[int] = None
-    session_id: str = "default"
+    session_id: Optional[str] = "default"
 
 
-@app.post("/reset", response_model=ResetResult)
-def reset(req: ResetRequest):
+@app.post("/reset")
+def reset(req: Optional[ResetRequest] = None):
+    if req is None:
+        req = ResetRequest()
     env = SupportTriageEnv(task_id=req.task_id, seed=req.seed)
     _envs[req.session_id] = env
     result = env.reset()
