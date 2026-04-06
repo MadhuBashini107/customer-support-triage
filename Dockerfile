@@ -2,19 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy server files
-COPY server/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server/ .
-COPY openenv.yaml .
+COPY . .
 
-# Non-root user for HF Spaces
 RUN useradd -m -u 1000 appuser && chown -R appuser /app
 USER appuser
 
