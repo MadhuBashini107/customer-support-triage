@@ -1,0 +1,5 @@
+echo "__pycache__/" > .gitignore
+echo "*.pyc" >> .gitignore
+echo "CACHEDIR.TAG" >> .gitignore
+echo "nodeids" >> .gitignore
+echo "mnt/" >> .gitignore
