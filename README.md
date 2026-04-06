@@ -1,3 +1,14 @@
+---
+title: Customer Support Triage
+emoji: 🎫
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+tags:
+  - openenv
+---
 # 🎫 Customer Support Triage — OpenEnv Environment
 
 An OpenEnv-compliant reinforcement learning environment where AI agents learn to **triage customer support tickets**: classify, prioritize, decide on escalation, and draft professional responses.
