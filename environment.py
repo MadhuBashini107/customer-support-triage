@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-# ─────────────────────────── Enums ───────────────────────────
+# ─────────────────────────────── Enums ───────────────────────────────
 
 class Category(str, Enum):
     BILLING = "billing"
@@ -31,13 +31,13 @@ class TaskDifficulty(str, Enum):
     MEDIUM = "medium"
     HARD = "hard"
 
-# ─────────────────────────── OpenEnv Models ───────────────────────────
+# ─────────────────────────────── OpenEnv Models ───────────────────────────────
 
 class Observation(BaseModel):
     ticket_id: str
     subject: str
     body: str
-    customer_tier: str  # "free" | "pro" | "enterprise"
+    customer_tier: str
     previous_contacts: int
     attachments: List[str]
     task_description: str
@@ -78,7 +78,7 @@ class StateResult(BaseModel):
     ticket: Dict[str, Any]
     agent_actions: List[Dict[str, Any]]
 
-# ─────────────────────────── Ticket Bank ───────────────────────────
+# ─────────────────────────────── Ticket Bank ───────────────────────────────
 
 TICKETS = {
     "easy": [
@@ -227,117 +227,111 @@ TICKETS = {
     ],
 }
 
-# ─────────────────────────── Grader Logic ───────────────────────────
+# ─────────────────────────────── Grader Logic ───────────────────────────────
+
+def clamp(value: float) -> float:
+    """Clamp value to strictly between 0.001 and 0.999."""
+    return round(min(0.999, max(0.001, value)), 4)
 
 def grade_action(action: Action, ground_truth: Dict, step: int, max_steps: int) -> Tuple[float, Dict[str, float], str]:
-    """Score an agent's action against ground truth. Returns (reward, breakdown, message)."""
     breakdown: Dict[str, float] = {}
     messages: List[str] = []
 
-    # 1. Category classification (0.25)
+    # 1. Category (0.25)
     if action.category:
         try:
             cat = Category(action.category.lower())
             if cat == ground_truth["category"]:
                 breakdown["category"] = 0.25
-                messages.append("✓ Correct category")
+                messages.append("Correct category")
             else:
                 breakdown["category"] = 0.05
-                messages.append(f"✗ Wrong category (got {cat}, expected {ground_truth['category']})")
+                messages.append(f"Wrong category (got {cat}, expected {ground_truth['category']})")
         except ValueError:
-            breakdown["category"] = 0.0
-            messages.append("✗ Invalid category value")
+            breakdown["category"] = 0.001
+            messages.append("Invalid category value")
     else:
-        breakdown["category"] = 0.0
+        breakdown["category"] = 0.001
 
-    # 2. Priority classification (0.25)
+    # 2. Priority (0.25)
     if action.priority:
         try:
             pri = Priority(action.priority.lower())
             gt_pri = ground_truth["priority"]
             if pri == gt_pri:
                 breakdown["priority"] = 0.25
-                messages.append("✓ Correct priority")
+                messages.append("Correct priority")
             else:
-                # Partial credit for adjacent priority
                 pri_order = [Priority.LOW, Priority.MEDIUM, Priority.HIGH, Priority.URGENT]
                 diff = abs(pri_order.index(pri) - pri_order.index(gt_pri))
-                partial = max(0.0, 0.25 - diff * 0.08)
+                partial = max(0.001, 0.25 - diff * 0.08)
                 breakdown["priority"] = round(partial, 3)
-                messages.append(f"~ Priority off by {diff} level(s)")
+                messages.append(f"Priority off by {diff} level(s)")
         except ValueError:
-            breakdown["priority"] = 0.0
-            messages.append("✗ Invalid priority value")
+            breakdown["priority"] = 0.001
+            messages.append("Invalid priority value")
     else:
-        breakdown["priority"] = 0.0
+        breakdown["priority"] = 0.001
 
-    # 3. Escalation decision (0.15)
+    # 3. Escalation (0.15)
     gt_escalate = ground_truth.get("escalate", False)
     if action.escalate == gt_escalate:
         breakdown["escalation"] = 0.15
-        messages.append("✓ Correct escalation decision")
+        messages.append("Correct escalation decision")
     elif action.escalate and not gt_escalate:
-        breakdown["escalation"] = 0.05  # over-escalating is minor penalty
-        messages.append("~ Over-escalated (not required)")
+        breakdown["escalation"] = 0.05
+        messages.append("Over-escalated")
     else:
-        breakdown["escalation"] = 0.0
-        messages.append("✗ Should have escalated")
+        breakdown["escalation"] = 0.001
+        messages.append("Should have escalated")
 
     # 4. Response quality (0.35)
-    response_score = 0.0
+    response_score = 0.001
     if action.response and len(action.response.strip()) > 20:
         response_lower = action.response.lower()
         key_topics = ground_truth.get("key_topics", [])
         must_include = ground_truth.get("response_must_include", [])
         must_not_include = ground_truth.get("response_must_not_include", [])
 
-        # Check key topics coverage
         topics_found = sum(1 for t in key_topics if t.lower() in response_lower)
         topic_ratio = topics_found / len(key_topics) if key_topics else 1.0
 
-        # Check required phrases
         required_found = sum(1 for r in must_include if r.lower() in response_lower)
         required_ratio = required_found / len(must_include) if must_include else 1.0
 
-        # Check prohibited phrases
         prohibited_found = any(p.lower() in response_lower for p in must_not_include)
 
-        response_score = (topic_ratio * 0.15 + required_ratio * 0.15)
+        response_score = topic_ratio * 0.15 + required_ratio * 0.15
         if prohibited_found:
-            response_score = max(0.0, response_score - 0.1)
-            messages.append("✗ Response contains inappropriate phrase")
-        # Length bonus for substantive responses
+            response_score = max(0.001, response_score - 0.1)
+            messages.append("Response contains inappropriate phrase")
         if len(action.response) > 100:
             response_score = min(0.35, response_score + 0.05)
-        messages.append(f"~ Response covers {topics_found}/{len(key_topics)} key topics, {required_found}/{len(must_include)} required phrases")
-    else:
-        messages.append("✗ No/insufficient response provided")
+        messages.append(f"Response covers {topics_found}/{len(key_topics)} key topics")
 
-    breakdown["response"] = round(response_score, 3)
+    breakdown["response"] = round(max(0.001, response_score), 3)
 
-    # 5. Step efficiency bonus (up to 0.0 — neutral, we don't penalize thinking)
-    # But penalize if resolve without proper categorization
-    if action.resolve and breakdown["category"] == 0.0:
+    # 5. Resolve penalty
+    if action.resolve and breakdown["category"] <= 0.001:
         breakdown["resolve_penalty"] = -0.05
-        messages.append("✗ Resolved without categorization")
+        messages.append("Resolved without categorization")
     else:
         breakdown["resolve_penalty"] = 0.0
 
     total = sum(breakdown.values())
-    total = round(min(1.0, max(0.0, total)), 4)
+    total = clamp(total)
     feedback = " | ".join(messages)
     return total, breakdown, feedback
 
 
-# ─────────────────────────── Environment ───────────────────────────
+# ─────────────────────────────── Environment ───────────────────────────────
 
 class SupportTriageEnv:
-    """Customer Support Triage OpenEnv environment."""
 
     TASK_CONFIGS = {
-        "easy": {"max_steps": 5, "tickets": TICKETS["easy"]},
-        "medium": {"max_steps": 8, "tickets": TICKETS["medium"]},
-        "hard": {"max_steps": 10, "tickets": TICKETS["hard"]},
+        "easy":   {"max_steps": 5,  "tickets": TICKETS["easy"]},
+        "medium": {"max_steps": 8,  "tickets": TICKETS["medium"]},
+        "hard":   {"max_steps": 10, "tickets": TICKETS["hard"]},
     }
 
     def __init__(self, task_id: str = "easy", seed: Optional[int] = None):
@@ -352,6 +346,7 @@ class SupportTriageEnv:
         self._ticket: Dict = {}
         self._actions: List[Dict] = []
         self._last_feedback = ""
+        self._max_steps = 5
 
     def reset(self) -> ResetResult:
         self._step = 0
@@ -359,24 +354,26 @@ class SupportTriageEnv:
         self._cumulative_reward = 0.0
         self._actions = []
         self._last_feedback = ""
-
         cfg = self.TASK_CONFIGS[self.task_id]
         self._ticket = self._rng.choice(cfg["tickets"])
         self._max_steps = cfg["max_steps"]
-
-        obs = self._make_observation()
-        return ResetResult(observation=obs)
+        return ResetResult(observation=self._make_observation())
 
     def step(self, action: Action) -> StepResult:
         if self._done:
-            obs = self._make_observation()
-            return StepResult(observation=obs, reward=0.0, done=True, info={"error": "Episode already done"})
+            return StepResult(
+                observation=self._make_observation(),
+                reward=0.001,
+                done=True,
+                info={"error": "Episode already done"}
+            )
 
         self._step += 1
         gt = self._ticket["ground_truth"]
         reward, breakdown, feedback = grade_action(action, gt, self._step, self._max_steps)
 
-        self._cumulative_reward = min(1.0, self._cumulative_reward + reward / self._max_steps)
+        self._cumulative_reward = min(0.999, self._cumulative_reward + reward / self._max_steps)
+        self._cumulative_reward = max(0.001, self._cumulative_reward)
         self._last_feedback = feedback
         self._actions.append({
             "step": self._step,
@@ -388,10 +385,9 @@ class SupportTriageEnv:
         done = bool(action.resolve) or self._step >= self._max_steps
         self._done = done
 
-        obs = self._make_observation()
         return StepResult(
-            observation=obs,
-            reward=round(reward, 4),
+            observation=self._make_observation(),
+            reward=reward,
             done=done,
             info={"breakdown": breakdown, "feedback": feedback, "cumulative_reward": self._cumulative_reward},
         )
@@ -401,7 +397,7 @@ class SupportTriageEnv:
             task_id=self.task_id,
             difficulty=self.task_id,
             step=self._step,
-            max_steps=self._max_steps if self._ticket else 0,
+            max_steps=self._max_steps,
             cumulative_reward=round(self._cumulative_reward, 4),
             done=self._done,
             ticket={k: v for k, v in self._ticket.items() if k != "ground_truth"},
@@ -411,8 +407,8 @@ class SupportTriageEnv:
     def _make_observation(self) -> Observation:
         task_descs = {
             "easy": "Triage this support ticket: classify the category, set priority, and draft a helpful response.",
-            "medium": "Triage this ticket carefully: correct category and priority are critical. Decide whether to escalate. Draft a professional response addressing all customer concerns.",
-            "hard": "This is a complex, high-stakes ticket. Accurately classify, set urgent priority if warranted, decide escalation, and draft a thorough, empathetic response that addresses every point raised by the customer.",
+            "medium": "Triage this ticket carefully: correct category and priority are critical. Decide whether to escalate.",
+            "hard": "This is a complex high-stakes ticket. Classify accurately, set urgent priority if warranted, decide escalation, and draft a thorough empathetic response.",
         }
         return Observation(
             ticket_id=self._ticket.get("ticket_id", ""),
@@ -423,7 +419,7 @@ class SupportTriageEnv:
             attachments=self._ticket.get("attachments", []),
             task_description=task_descs[self.task_id],
             step=self._step,
-            max_steps=self._max_steps if self._ticket else 0,
+            max_steps=self._max_steps,
             current_score=round(self._cumulative_reward, 4),
             feedback=self._last_feedback if self._step > 0 else None,
         )
