@@ -23,29 +23,23 @@ if not API_KEY:
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 # ── Logging helpers ────────────────────────────────────────────────────────
-def log(obj: dict):
-    print(json.dumps(obj), flush=True)
+def log_start(task: str):
+    print(f"[START] task={task}", flush=True)
 
-def log_start(task: str, model: str):
-    log({"event": "START", "task": task, "model": model})
+def log_step(step: int, reward: float):
+    print(f"[STEP] step={step} reward={reward:.4f}", flush=True)
 
-def log_step(step: int, reward: float, action: dict, observation: dict):
-    log({"event": "STEP", "step": step, "reward": reward,
-         "action": action, "observation": observation})
-
-def log_end(task: str, score: float, steps: int, success: bool):
-    log({"event": "END", "task": task, "score": score,
-         "steps": steps, "success": success})
+def log_end(task: str, score: float, steps: int):
+    print(f"[END] task={task} score={score:.4f} steps={steps}", flush=True)
 
 # ── Agent ──────────────────────────────────────────────────────────────────
 def run_task(task_id: str):
-    # Reset
     r = httpx.post(f"{ENV_BASE_URL}/reset",
                    json={"task_id": task_id}, timeout=30)
     r.raise_for_status()
     obs = r.json()
 
-    log_start(f"customer-support-triage/{task_id}", MODEL_NAME)
+    log_start(f"customer-support-triage/{task_id}")
 
     step_num = 0
     total_reward = 0.0
@@ -54,7 +48,6 @@ def run_task(task_id: str):
     while not done:
         step_num += 1
 
-        # Build prompt
         prompt = f"""You are a customer support triage agent.
 
 Ticket: {json.dumps(obs.get('ticket', obs), indent=2)}
@@ -75,7 +68,6 @@ Return ONLY valid JSON, nothing else."""
 
         raw = completion.choices[0].message.content.strip()
 
-        # Parse action
         try:
             action = json.loads(raw)
         except json.JSONDecodeError:
@@ -86,21 +78,20 @@ Return ONLY valid JSON, nothing else."""
                 "escalate": False, "response": raw
             }
 
-        # Step
         step_r = httpx.post(f"{ENV_BASE_URL}/step",
                              json={"action": action}, timeout=30)
         step_r.raise_for_status()
         result = step_r.json()
 
-        reward   = result.get("reward", 0.0)
-        done     = result.get("done", True)
-        obs      = result.get("observation", {})
+        reward       = result.get("reward", 0.0)
+        done         = result.get("done", True)
+        obs          = result.get("observation", {})
         total_reward += reward
 
-        log_step(step_num, reward, action, obs)
+        log_step(step_num, reward)
 
     log_end(f"customer-support-triage/{task_id}",
-            total_reward / max(step_num, 1), step_num, total_reward > 0.5)
+            total_reward / max(step_num, 1), step_num)
 
 # ── Main ───────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -108,5 +99,4 @@ if __name__ == "__main__":
         try:
             run_task(task)
         except Exception as e:
-            print(json.dumps({"event": "ERROR", "task": task,
-                              "error": str(e)}), flush=True)
+            print(f"[ERROR] task={task} error={str(e)}", flush=True)
