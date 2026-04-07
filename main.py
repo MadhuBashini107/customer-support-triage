@@ -5,24 +5,18 @@ for the Customer Support Triage environment.
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from environment import (
-    Action,
-    Observation,
-    Reward,
-    ResetResult,
-    StateResult,
-    StepResult,
-    SupportTriageEnv,
+    Action, SupportTriageEnv, Category, Priority, SentimentLabel
 )
 
 app = FastAPI(
-    title="Customer Support Triage – OpenEnv",
-    description="An OpenEnv environment for AI agents to learn customer support triage: classify, prioritize, escalate, and respond to tickets.",
-    version="1.0.0",
+    title="Customer Support Triage — OpenEnv",
+    description="An OpenEnv environment where AI agents learn to triage real-world customer support tickets.",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -32,91 +26,94 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global environment registry (single-session for simplicity)
 _envs: Dict[str, SupportTriageEnv] = {}
 
 
-def _get_env(session_id: str) -> SupportTriageEnv:
-    if session_id not in _envs:
-        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found. Call /reset first.")
-    return _envs[session_id]
+class ResetRequest(BaseModel):
+    task_id: Optional[str]    = "easy"
+    seed: Optional[int]       = None
+    session_id: Optional[str] = "default"
 
 
-# ─────────────────────────── Health ───────────────────────────
+class StepRequest(BaseModel):
+    action: Dict[str, Any]
+    session_id: Optional[str] = "default"
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": "2.0.0"}
+
 
 @app.get("/")
 def root():
     return {
         "name": "customer-support-triage",
-        "version": "1.0.0",
-        "status": "ok",
+        "version": "2.0.0",
+        "description": "OpenEnv environment for AI-powered customer support triage",
         "tasks": ["easy", "medium", "hard"],
+        "endpoints": ["/reset", "/step", "/state", "/tasks", "/observation_space", "/action_space"],
     }
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-# ─────────────────────────── OpenEnv API ───────────────────────────
-
-class ResetRequest(BaseModel):
-    task_id: Optional[str] = "easy"
-    seed: Optional[int] = None
-    session_id: Optional[str] = "default"
 
 
 @app.post("/reset")
 def reset(req: Optional[ResetRequest] = None):
     if req is None:
         req = ResetRequest()
-    env = SupportTriageEnv(task_id=req.task_id, seed=req.seed)
-    _envs[req.session_id] = env
-    result = env.reset()
-    return result
+    try:
+        env = SupportTriageEnv(task_id=req.task_id or "easy", seed=req.seed)
+        _envs[req.session_id or "default"] = env
+        result = env.reset()
+        return result.model_dump()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-class StepRequest(BaseModel):
-    action: Action
-    session_id: str = "default"
-
-
-@app.post("/step", response_model=StepResult)
+@app.post("/step")
 def step(req: StepRequest):
-    env = _get_env(req.session_id)
-    result = env.step(req.action)
-    return result
+    env = _envs.get(req.session_id or "default")
+    if env is None:
+        raise HTTPException(status_code=400, detail="No active session. Call /reset first.")
+    try:
+        action = Action(**req.action)
+        result = env.step(action)
+        return result.model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/state", response_model=StateResult)
-def state(session_id: str = Query("default")):
-    env = _get_env(session_id)
-    return env.state()
+@app.get("/state")
+def state(session_id: str = "default"):
+    env = _envs.get(session_id)
+    if env is None:
+        raise HTTPException(status_code=400, detail="No active session. Call /reset first.")
+    return env.state().model_dump()
 
 
 @app.get("/tasks")
-def list_tasks():
+def tasks():
     return {
         "tasks": [
             {
                 "id": "easy",
-                "difficulty": "easy",
-                "description": "Simple, single-issue tickets (password reset, invoice request). Clear category and low priority.",
+                "name": "Easy Triage",
+                "description": "Simple, unambiguous tickets: password resets, invoice requests, general enquiries.",
                 "max_steps": 5,
-                "ticket_count": 3,
+                "ticket_count": 4,
             },
             {
                 "id": "medium",
-                "difficulty": "medium",
-                "description": "Multi-issue tickets (duplicate charges, API errors). Requires correct escalation decisions.",
+                "name": "Medium Triage",
+                "description": "Emotionally charged tickets with billing disputes, API errors, GDPR requests.",
                 "max_steps": 8,
-                "ticket_count": 3,
+                "ticket_count": 4,
             },
             {
                 "id": "hard",
-                "difficulty": "hard",
-                "description": "Complex, high-stakes tickets: data breaches, SLA violations, GDPR requests. Requires nuanced response.",
+                "name": "Hard Triage",
+                "description": "High-stakes tickets: security breaches, SLA violations, multi-regulation compliance.",
                 "max_steps": 10,
-                "ticket_count": 3,
+                "ticket_count": 4,
             },
         ]
     }
@@ -124,12 +121,42 @@ def list_tasks():
 
 @app.get("/observation_space")
 def observation_space():
-    return Observation.model_json_schema()
+    return {
+        "type": "dict",
+        "fields": {
+            "ticket_id":           {"type": "string"},
+            "subject":             {"type": "string"},
+            "body":                {"type": "string"},
+            "customer_tier":       {"type": "string", "enum": ["free", "pro", "enterprise"]},
+            "previous_contacts":   {"type": "integer"},
+            "attachments":         {"type": "array", "items": {"type": "string"}},
+            "sentiment":           {"type": "string", "enum": ["positive", "neutral", "negative", "furious"]},
+            "regulatory_flags":    {"type": "array", "items": {"type": "string"}},
+            "sla_hours_remaining": {"type": "number", "nullable": True},
+            "task_description":    {"type": "string"},
+            "step":                {"type": "integer"},
+            "max_steps":           {"type": "integer"},
+            "current_score":       {"type": "number"},
+            "feedback":            {"type": "string", "nullable": True},
+        },
+    }
 
 
 @app.get("/action_space")
 def action_space():
-    return Action.model_json_schema()
+    return {
+        "type": "dict",
+        "fields": {
+            "category":           {"type": "string", "enum": [c.value for c in Category]},
+            "priority":           {"type": "string", "enum": [p.value for p in Priority]},
+            "sentiment_detected": {"type": "string", "enum": [s.value for s in SentimentLabel]},
+            "escalate":           {"type": "boolean"},
+            "department":         {"type": "string", "enum": ["billing_team", "engineering", "legal", "security", "account_team", "general_support"]},
+            "response":           {"type": "string"},
+            "resolve":            {"type": "boolean"},
+            "tags":               {"type": "array", "items": {"type": "string"}},
+        },
+    }
 
 
 if __name__ == "__main__":
